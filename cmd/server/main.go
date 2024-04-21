@@ -9,5 +9,6 @@ func main() {
 	s := server.New(server.Config{})
 	w := world.New()
 	s.SetPeerHandler(w)
+	w.Start()
 	s.Start()
 }
