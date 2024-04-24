@@ -7,6 +7,8 @@ import (
 	"net"
 
 	"github.com/nathanlabel1983/guo/internal/server/messages"
+	"github.com/nathanlabel1983/guo/internal/server/messages/inbound"
+	"github.com/nathanlabel1983/guo/internal/server/messages/outbound"
 )
 
 const (
@@ -14,7 +16,9 @@ const (
 	CmdLoginRequestPacket = byte(0x80)
 )
 
-type Seed struct {
+// seed is the initial packet sent by the client to the server, this must be successful
+// before any other packets can be sent. It will trigger the authentication process.
+type seed struct {
 	SeedIP string // Seed of the client, usually an IP address
 	Major  uint32 // Major version of the client
 	Minor  uint32 // Minor version of the client
@@ -22,8 +26,19 @@ type Seed struct {
 	Proto  uint32 // Prototype of the client
 }
 
+// Seeded returns true if the seed has been received and the client is ready to authenticate
+func (s *seed) Seeded() bool {
+	return s.SeedIP != ""
+}
+
+// Peer represents a connection to a client. It contains the connection, the seed information, once
+// the seed packet has been received and the Peer has been authenticated, the connection is then
+// handed off to the PeerHandler.
 type Peer struct {
-	Seed
+	seed
+
+	Authenticated bool
+	authenticater Authenticater
 
 	connection         net.Conn
 	ReceiveMessageChan chan io.Reader
@@ -31,6 +46,10 @@ type Peer struct {
 
 	ctx    context.Context
 	cancel context.CancelFunc
+}
+
+type Authenticater interface {
+	Authenticate(username, password string) (bool, outbound.LoginDeniedCode)
 }
 
 func NewPeer(conn net.Conn) *Peer {
@@ -74,17 +93,18 @@ func (p *Peer) handleReceive(ctx context.Context) {
 			}
 			if err != nil {
 				slog.Error("failed to read command", "error", err)
-				continue
+				p.Close()
+				return
 			}
 			switch cmd[0] {
 			case CmdSeedPacket:
 				p.seedPeer()
-				p.authenticatePeer()
 			case CmdLoginRequestPacket:
-				p.processPacket(messages.GetMessageFromRequestLoginPacket)
+				p.authenticatePeer()
 			default:
 				slog.Error("unknown command", "command", cmd[0])
 			}
+
 		}
 	}
 }
@@ -94,11 +114,11 @@ func (p *Peer) seedPeer() {
 	if err != nil {
 		panic(err)
 	}
-	sm, ok := seedMessage.(*messages.SeedMessage)
+	sm, ok := seedMessage.(*inbound.SeedMessage)
 	if !ok {
 		panic("failed to cast seed message")
 	}
-	p.Seed = Seed{
+	p.seed = seed{
 		SeedIP: sm.IPSeed(),
 		Major:  sm.Major(),
 		Minor:  sm.Minor(),
@@ -108,7 +128,39 @@ func (p *Peer) seedPeer() {
 }
 
 func (p *Peer) authenticatePeer() {
+	if !p.Seeded() {
+		slog.Error("peer not seeded. Closing...")
+		p.Close()
+	}
+	loginMessage, err := messages.GetMessageFromRequestLoginPacket(p.connection)
+	if err != nil {
+		slog.Error("failed to read login request packet", "error", err)
+		return
+	}
+	lm, ok := loginMessage.(*inbound.LoginRequestMessage)
+	if !ok {
+		slog.Error("failed to cast login message")
+		return
+	}
 
+	p.authenticater = &AuthTest{}
+
+	authState, reason := p.authenticater.Authenticate(lm.Username(), lm.Password())
+	if !authState {
+		slog.Info("Authentication failed", "reason", reason)
+		p.SendMessageChan <- outbound.NewLoginDeniedMessage(reason)
+	}
+	slog.Info("Authentication Result", "value", p.Authenticated)
+}
+
+// AuthTest is a simple Authenticater that always returns true - used for testing purposes
+type AuthTest struct {
+}
+
+// Authenticate returns true
+func (a *AuthTest) Authenticate(username, password string) (bool, outbound.LoginDeniedCode) {
+	slog.Info("authenticating peer", "username", username, "password", password)
+	return true, outbound.LoginDeniedIncorrectNamePassword
 }
 
 func (p *Peer) processPacket(pktFunc func(net.Conn) (io.Reader, error)) {
@@ -130,7 +182,7 @@ func (p *Peer) handleSend(ctx context.Context) {
 			_, err := io.Copy(p.connection, message)
 			if err != nil {
 				slog.Error("failed to send message", "error", err)
-				continue
+				p.Close()
 			}
 		}
 	}

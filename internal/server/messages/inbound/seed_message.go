@@ -1,4 +1,4 @@
-package messages
+package inbound
 
 import (
 	"encoding/binary"
@@ -34,17 +34,17 @@ func (m *SeedMessage) IPSeed() string {
 }
 
 func (m *SeedMessage) Major() uint32 {
-	return binary.LittleEndian.Uint32(m.data[4:8])
+	return binary.BigEndian.Uint32(m.data[4:8])
 }
 
 func (m *SeedMessage) Minor() uint32 {
-	return binary.LittleEndian.Uint32(m.data[8:12])
+	return binary.BigEndian.Uint32(m.data[8:12])
 }
 
 func (m *SeedMessage) Revision() uint32 {
-	return binary.LittleEndian.Uint32(m.data[12:16])
+	return binary.BigEndian.Uint32(m.data[12:16])
 }
 
 func (m *SeedMessage) Prototype() uint32 {
-	return binary.LittleEndian.Uint32(m.data[16:20])
+	return binary.BigEndian.Uint32(m.data[16:20])
 }

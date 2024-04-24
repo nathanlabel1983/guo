@@ -5,6 +5,8 @@ import (
 	"io"
 	"log/slog"
 	"net"
+
+	"github.com/nathanlabel1983/guo/internal/server/messages/inbound"
 )
 
 func GetMessageFromSeedPacket(conn net.Conn) (io.Reader, error) {
@@ -14,7 +16,7 @@ func GetMessageFromSeedPacket(conn net.Conn) (io.Reader, error) {
 		return nil, err
 	}
 	slog.Info("received seed packet")
-	return NewSeedMessage(bytes.NewReader(data)), nil
+	return inbound.NewSeedMessage(bytes.NewReader(data)), nil
 }
 
 func GetMessageFromRequestLoginPacket(conn net.Conn) (io.Reader, error) {
@@ -24,5 +26,5 @@ func GetMessageFromRequestLoginPacket(conn net.Conn) (io.Reader, error) {
 		return nil, err
 	}
 	slog.Info("received login request packet")
-	return NewRequestLoginMessage(bytes.NewReader(data)), nil
+	return inbound.NewRequestLoginMessage(bytes.NewReader(data)), nil
 }
