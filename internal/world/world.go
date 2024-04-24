@@ -2,6 +2,7 @@ package world
 
 import (
 	"log/slog"
+	"sync"
 	"time"
 
 	"github.com/nathanlabel1983/guo/internal/server"
@@ -13,6 +14,7 @@ type World struct {
 
 type State struct {
 	peers     map[*server.Peer]bool
+	peersMu   sync.Mutex
 	timeStart time.Time
 	timeNow   time.Time
 }
@@ -21,6 +23,7 @@ func New() *World {
 	return &World{
 		State: State{
 			peers:     make(map[*server.Peer]bool),
+			peersMu:   sync.Mutex{},
 			timeStart: time.Now(),
 			timeNow:   time.Now(),
 		},
@@ -28,7 +31,9 @@ func New() *World {
 }
 
 func (w *World) HandlePeer(p *server.Peer) {
+	w.peersMu.Lock()
 	w.peers[p] = true
+	w.peersMu.Unlock()
 }
 
 func (w *World) Start() {

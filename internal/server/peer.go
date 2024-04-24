@@ -14,14 +14,14 @@ const (
 	CmdLoginRequestPacket = byte(0x80)
 )
 
-type MessageReader interface {
-	ToBytes() []byte
-}
+// type MessageReader interface {
+// 	ToBytes() []byte
+// }
 
 type Peer struct {
 	connection         net.Conn
-	ReceiveMessageChan chan MessageReader
-	SendMessageChan    chan MessageReader
+	ReceiveMessageChan chan io.Reader
+	SendMessageChan    chan io.Reader
 
 	ctx    context.Context
 	cancel context.CancelFunc
@@ -31,8 +31,8 @@ func NewPeer(conn net.Conn) *Peer {
 	ctx, cancel := context.WithCancel(context.Background())
 	return &Peer{
 		connection:         conn,
-		ReceiveMessageChan: make(chan MessageReader, 10),
-		SendMessageChan:    make(chan MessageReader, 10),
+		ReceiveMessageChan: make(chan io.Reader, 10),
+		SendMessageChan:    make(chan io.Reader, 10),
 
 		ctx:    ctx,
 		cancel: cancel,
@@ -71,24 +71,23 @@ func (p *Peer) handleReceive(ctx context.Context) {
 			}
 			switch cmd[0] {
 			case CmdSeedPacket:
-				message, err := getMessageFromSeedPacket(p.connection)
-				if err != nil {
-					slog.Error("failed to read seed packet", "error", err)
-					continue
-				}
-				p.ReceiveMessageChan <- message
+				p.processPacket(messages.GetMessageFromSeedPacket)
 			case CmdLoginRequestPacket:
-				message, err := getMessageFromRequestLoginPacket(p.connection)
-				if err != nil {
-					slog.Error("failed to read login request packet", "error", err)
-					continue
-				}
-				p.ReceiveMessageChan <- message
+				p.processPacket(messages.GetMessageFromRequestLoginPacket)
 			default:
 				slog.Error("unknown command", "command", cmd[0])
 			}
 		}
 	}
+}
+
+func (p *Peer) processPacket(pktFunc func(net.Conn) (io.Reader, error)) {
+	m, err := pktFunc(p.connection)
+	if err != nil {
+		slog.Error("failed to read packet", "error", err)
+		return
+	}
+	p.ReceiveMessageChan <- m
 }
 
 func (p *Peer) handleSend(ctx context.Context) {
@@ -98,31 +97,11 @@ func (p *Peer) handleSend(ctx context.Context) {
 			return
 		default:
 			message := <-p.SendMessageChan
-			_, err := p.connection.Write(message.ToBytes())
+			_, err := io.Copy(p.connection, message)
 			if err != nil {
 				slog.Error("failed to send message", "error", err)
 				continue
 			}
 		}
 	}
-}
-
-func getMessageFromSeedPacket(conn net.Conn) (MessageReader, error) {
-	data := make([]byte, 20)
-	_, err := conn.Read(data)
-	if err != nil {
-		return nil, err
-	}
-	slog.Info("received seed packet")
-	return messages.NewSeedMessage(data), nil
-}
-
-func getMessageFromRequestLoginPacket(conn net.Conn) (MessageReader, error) {
-	data := make([]byte, 61)
-	_, err := conn.Read(data)
-	if err != nil {
-		return nil, err
-	}
-	slog.Info("received login request packet")
-	return messages.NewRequestLoginMessage(data), nil
 }
