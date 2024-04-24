@@ -14,11 +14,17 @@ const (
 	CmdLoginRequestPacket = byte(0x80)
 )
 
-// type MessageReader interface {
-// 	ToBytes() []byte
-// }
+type Seed struct {
+	SeedIP string // Seed of the client, usually an IP address
+	Major  uint32 // Major version of the client
+	Minor  uint32 // Minor version of the client
+	Rev    uint32 // Revision of the client
+	Proto  uint32 // Prototype of the client
+}
 
 type Peer struct {
+	Seed
+
 	connection         net.Conn
 	ReceiveMessageChan chan io.Reader
 	SendMessageChan    chan io.Reader
@@ -44,6 +50,7 @@ func (p *Peer) Close() {
 	if p.connection != nil {
 		slog.Info("connection closed", "remote_addr", p.connection.RemoteAddr().String())
 		p.connection.Close()
+		p.cancel()
 	}
 }
 
@@ -71,7 +78,8 @@ func (p *Peer) handleReceive(ctx context.Context) {
 			}
 			switch cmd[0] {
 			case CmdSeedPacket:
-				p.processPacket(messages.GetMessageFromSeedPacket)
+				p.seedPeer()
+				p.authenticatePeer()
 			case CmdLoginRequestPacket:
 				p.processPacket(messages.GetMessageFromRequestLoginPacket)
 			default:
@@ -79,6 +87,28 @@ func (p *Peer) handleReceive(ctx context.Context) {
 			}
 		}
 	}
+}
+
+func (p *Peer) seedPeer() {
+	seedMessage, err := messages.GetMessageFromSeedPacket(p.connection)
+	if err != nil {
+		panic(err)
+	}
+	sm, ok := seedMessage.(*messages.SeedMessage)
+	if !ok {
+		panic("failed to cast seed message")
+	}
+	p.Seed = Seed{
+		SeedIP: sm.IPSeed(),
+		Major:  sm.Major(),
+		Minor:  sm.Minor(),
+		Rev:    sm.Revision(),
+		Proto:  sm.Prototype(),
+	}
+}
+
+func (p *Peer) authenticatePeer() {
+
 }
 
 func (p *Peer) processPacket(pktFunc func(net.Conn) (io.Reader, error)) {
